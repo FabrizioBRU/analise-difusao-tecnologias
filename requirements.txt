@@ -1,8 +1,9 @@
-streamlit==1.46.0
-pandas==2.3.0
-numpy==2.0.2
-matplotlib==3.9.4
-seaborn==0.13.2
+streamlit
+pandas
+numpy
+matplotlib
+seaborn
 scipy
 statsmodels
-networkx==3.2.1
+networkx
+# Versão final das dependências para forçar o rebuild
