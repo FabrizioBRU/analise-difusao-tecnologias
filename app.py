@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-PROTÓTIPO: VETORES ANTECEDENTES DA DIFUSÃO PARA TECNOLOGIAS EMERGENTES
+PROJETO: VETORES ANTECEDENTES DA DIFUSÃO PARA TECNOLOGIAS EMERGENTES
 APLICATIVO WEB INTERATIVO
 Autor da Metodologia: Fabrizio Bruzetti (TA - FGV)
 Desenvolvimento da Automação: Gemini (Google)
 Data: 01 de Julho de 2025
-VERSÃO: 24.0 (Versão Final com todos os textos de análise)
+VERSÃO: 25.0 (Versão Final Completa com todos os textos)
 """
 
 # ==============================================================================
@@ -177,7 +177,7 @@ st.info("**Clique no botão abaixo para gerar a análise completa e explorar est
 if 'analysis_generated' not in st.session_state:
     st.session_state.analysis_generated = False
 
-if st.button('▶️ Gerar Análise Completa') or st.session_state.analysis_generated:
+if st.button('▶️ Gerar Análise Completa', key='start_button') or st.session_state.analysis_generated:
     st.session_state.analysis_generated = True
 
     df_final, df_trends = carregar_e_preparar_dados(ARQUIVO_TRENDS, ARQUIVO_PATENTES, ARQUIVO_CIENCIA, ANO_FINAL)
@@ -238,8 +238,20 @@ if st.button('▶️ Gerar Análise Completa') or st.session_state.analysis_gene
     """)
     with st.spinner('Gerando gráficos da análise cruzada...'):
         st.subheader("Análise de Correlação (CCF) e Heatmap")
-        # (O código para os gráficos de CCF, Heatmap e Grafo continua aqui)
-        # ...
+        ccf_matrix = pd.DataFrame(index=['Interesse Público', 'Inovação Formal', 'Produção Científica'], columns=['Interesse Público', 'Inovação Formal', 'Produção Científica'])
+        for v1_col, v1_name in zip(['Interesse_norm', 'Patentes_norm', 'Artigos_norm'], ['Interesse Público', 'Inovação Formal', 'Produção Científica']):
+            for v2_col, v2_name in zip(['Interesse_norm', 'Patentes_norm', 'Artigos_norm'], ['Interesse Público', 'Inovação Formal', 'Produção Científica']):
+                ccf_matrix.loc[v1_name, v2_name] = ccf(df_final[v1_col], df_final[v2_col], adjusted=False)[0]
+        ccf_matrix = ccf_matrix.astype(float)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            fig, ax = plt.subplots(figsize=(8, 6)); sns.heatmap(ax=ax, data=ccf_matrix, annot=True, cmap='YlOrRd', fmt=".3f", linewidths=.5, vmin=0.9); ax.set_title("Heatmap das Correlações (Lag=0)", fontsize=14); st.pyplot(fig)
+        with col2:
+            G = nx.DiGraph(); edges = {("Produção Científica", "Inovação Formal"): ccf_matrix.loc['Produção Científica', 'Inovação Formal'],("Produção Científica", "Interesse Público"): ccf_matrix.loc['Produção Científica', 'Interesse Público'],("Inovação Formal", "Interesse Público"): ccf_matrix.loc['Inovação Formal', 'Interesse Público'],};
+            for (u,v), w in edges.items(): G.add_edge(u,v, weight=w)
+            pos = nx.circular_layout(G); edge_labels = {(u,v): f"{d['weight']:.3f}" for u,v,d in G.edges(data=True)}; weights = [d['weight'] * 5 for u,v,d in G.edges(data=True)]
+            fig, ax = plt.subplots(figsize=(8, 6)); nx.draw(G, pos, ax=ax, with_labels=True, node_color='skyblue', node_size=2500, font_size=10, font_weight='bold', arrowsize=20, width=weights); nx.draw_networkx_edge_labels(G, pos, ax=ax, edge_labels=edge_labels, font_color='red', font_size=10); ax.set_title("Grafo Direcional das Correlações (Lag=0)", fontsize=14); st.pyplot(fig)
 
     st.header("4. Modelagem de Curvas de Crescimento")
     st.markdown("""
@@ -249,7 +261,27 @@ if st.button('▶️ Gerar Análise Completa') or st.session_state.analysis_gene
     """)
     
     with st.spinner('Executando modelagem das curvas...'):
-        # ... (código da modelagem) ...
+        time_axis = np.arange(len(df_final))
+        vetores = {"Interesse Público": df_final['Interesse_cum'], "Inovação Formal": df_final['Patentes_cum'], "Produção Científica": df_final['Artigos_cum']}
+        resultados_modelagem = {}
+
+        for nome, serie in vetores.items():
+            y_data = serie.values; resultados_modelagem[nome] = {}
+            modelos_fits = {}
+            
+            try:
+                params_b, cov_b = curve_fit(bass_model, time_axis, y_data, p0=[max(y_data), 0.03, 0.38], maxfev=10000, bounds=([0,0,0], [max(y_data)*5, 1, 5])); r2 = r_squared(y_data, bass_model(time_axis, *params_b)); resultados_modelagem[nome]['Bass'] = {'params': params_b, 'r2': r2}; modelos_fits['Bass'] = {'params': params_b, 'cov': cov_b, 'func': bass_model}
+            except Exception: resultados_modelagem[nome]['Bass'] = "Falha"
+            try:
+                params_g, cov_g = curve_fit(gompertz_model, time_axis, y_data, p0=[max(y_data), 4, 0.1], maxfev=10000); r2 = r_squared(y_data, gompertz_model(time_axis, *params_g)); resultados_modelagem[nome]['Gompertz'] = {'params': params_g, 'r2': r2}; modelos_fits['Gompertz'] = {'params': params_g, 'cov': cov_g, 'func': gompertz_model}
+            except Exception: resultados_modelagem[nome]['Gompertz'] = "Falha"
+            try:
+                params_l, cov_l = curve_fit(logistic_model, time_axis, y_data, p0=[max(y_data), 0.3, np.median(time_axis)], maxfev=10000); r2 = r_squared(y_data, logistic_model(time_axis, *params_l)); resultados_modelagem[nome]['Logístico'] = {'params': params_l, 'r2': r2}; modelos_fits['Logístico'] = {'params': params_l, 'cov': cov_l, 'func': logistic_model}
+            except Exception: resultados_modelagem[nome]['Logístico'] = "Falha"
+            
+            st.subheader(f"Ajustes de Modelo para: {nome}")
+            fig = plotar_ajuste_geral(time_axis, y_data, f"Comparativo de Modelos - {nome}", df_final['Ano'].min(), modelos_fits)
+            st.pyplot(fig)
 
     st.header("5. Síntese dos Resultados")
     st.markdown("""
@@ -258,7 +290,17 @@ if st.button('▶️ Gerar Análise Completa') or st.session_state.analysis_gene
     """)
 
     with st.spinner('Gerando tabela de síntese...'):
-        # ... (código da tabela de síntese) ...
+        sintese = pd.DataFrame(index=['Interesse Público', 'Inovação Formal', 'Produção Científica'])
+        sintese['Crescimento Médio Anual (%)'] = [df_final['Cresc_Interesse'].mean(), df_final['Cresc_Patentes'].mean(), df_final['Cresc_Artigos'].mean()]
+        sintese['CCF max (vs. Produção Científica)'] = [ccf_matrix.loc['Interesse Público', 'Produção Científica'], ccf_matrix.loc['Inovação Formal', 'Produção Científica'], 1.0]
+
+        for n in vetores.keys():
+            for m in ['Bass', 'Gompertz', 'Logístico']:
+                res = resultados_modelagem[n].get(m, "Falha")
+                if isinstance(res, dict): sintese.loc[n, f'Parâmetros {m}'] = str(np.round(res['params'], 2)); sintese.loc[n, f'R² {m}'] = res['r2']
+                else: sintese.loc[n, f'Parâmetros {m}'] = res; sintese.loc[n, f'R² {m}'] = 0.0
+        
+        st.dataframe(sintese.round(4))
     
     st.balloons()
     st.success('Análise completa gerada com sucesso!')
